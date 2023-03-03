@@ -57,6 +57,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdarg.h>
 #include <errno.h>
 #include <dirent.h>
@@ -67,6 +68,7 @@
 #include <sys/time.h>
 #include <sys/file.h>
 #include <sys/prctl.h>
+#include <sys/auxv.h>
 
 /* Internal functions */
 #include "isol-internals.h"
@@ -76,6 +78,27 @@
 
 /* TMC for ODP */
 #include <tmc/isol.h>
+
+#ifdef __aarch64__
+
+#ifndef HWCAP_SVE
+#define HWCAP_SVE (1 << 22)
+#endif
+
+static inline bool sve_is_present(void)
+{
+	unsigned long hwcaps = getauxval(AT_HWCAP);
+	return (hwcaps & HWCAP_SVE) != 0;
+}
+
+static void force_sve_if_present()
+{
+	if (!sve_is_present())
+		return;
+	// this is `cntb x0` encoded not to force sve usage otherwise
+	asm volatile (".inst 0x0420E3E0" :::"x0");
+}
+#endif
 
 /* Compile-time options for debugging output */
 
@@ -908,6 +931,9 @@ static int start_isolation(int cpu)
 	if (sched_setaffinity(0, sizeof(cpu_set_t), &set))
 		return -1;
 
+#ifdef __aarch64__
+	force_sve_if_present();
+#endif
 	return prctl(PR_SET_TASK_ISOLATION,
 		     PR_TASK_ISOLATION_ENABLE
 		     | PR_TASK_ISOLATION_USERSIG
